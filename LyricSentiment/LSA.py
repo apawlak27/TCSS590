@@ -1,29 +1,26 @@
+# Song Sentiment Analysis (SA) 
+#
+# SA carried out by Lexicon-based SA (LSA) on Bag-Of-Words (BOW) features, 
+# utilizing Wu-Palmer Similarity (WPS)
+
+import string
 import glob
 import re
 import nltk
 import random
-import string
 import numpy as np
-import pandas
-import collections
-import itertools
+import pandas as pd
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer, WordNetLemmatizer
-from nltk.corpus import wordnet as wn
-from nltk.metrics import precision, recall, ConfusionMatrix
-from nltk.tokenize import TweetTokenizer
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
-
-
-random.seed(33)
-np.set_printoptions(precision=2)
-classes = ['Angry', 'Happy', 'Relaxed', 'Sad']
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import KFold
+from sklearn.cross_validation import cross_val_score
 
 stop_words = set(stopwords.words('english'))
 port = PorterStemmer()
-tknzr = TweetTokenizer()
-
 
 # Dataset file lists, 4 total, one for each emotion
 
@@ -45,32 +42,42 @@ angry_filelist = angry_filelist + angry_filelist2
 relaxed_filelist = relaxed_filelist + relaxed_filelist2
 sad_filelist = sad_filelist + sad_filelist2
 
+# read() function returns:
+# lyrics(text tokenized, and lowercased without stopwords per song) and
+# all_words(the lyrics output of all the songs as one list)
+# based on the input of a file list and emotion tag
 
 def read(filelist, tag):
     lyrics = []
     all_words = []
-
+    
     for f in filelist:
         try:
             with open(f,'r') as file:
                 song = file.read()
                 file.close()
+                #added
+                #song = song.decode("utf-8-sig")
                 song = re.sub(r"(\\n|\\u....|\t)", "", song)
                 song = re.sub(r"(\[\d\d:\d\d\.\d\d\])","",song)
                 song = song.lower()
-                song = nltk.word_tokenize(song)
-                #song = tknzr.tokenize(song)
+                #song = nltk.word_tokenize(song)
+                song = nltk.word_tokenize(song.translate(str.maketrans('','',string.punctuation)))
                 song = [w for w in song if not w in string.punctuation]
                 song = [w for w in song if not w in stop_words]
-                song = [port.stem(w) for w in song]
+                song = [w for w in song if w != "'"]
+                #song = [w for w in song if not "\ufeff" in w]
+                #song = [w for w in song if w != "'"]
                 song_tag = (song, tag)
                 lyrics.append(song_tag)
-
+                
                 for word in song:
                     all_words.append(word)
         except:
             break
     return lyrics, all_words
+
+# This function finds the features for a song
 
 def find_features(song):
     words = set(song)
@@ -80,182 +87,27 @@ def find_features(song):
 
     return features
 
-def plot_confusion_matrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        #print("Normalized confusion matrix")
-    #else:
-        #print('Confusion matrix, without normalization')
-
-    #print(cm)
-
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes)
-
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-
-    plt.tight_layout()
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-
-
+# Create lyrics list for the 4 emotions seperately, 
+# the entire lyric database, and all_words(a single list of all lyric tokens)
 
 happy_lyrics, happy_words = read(happy_filelist, 'happy')
 angry_lyrics, angry_words = read(angry_filelist, 'angry')
 relaxed_lyrics, relaxed_words = read(relaxed_filelist, 'relaxed')
 sad_lyrics, sad_words = read(sad_filelist, 'sad')
 
+# Create "data" for testing
 data = happy_lyrics + angry_lyrics + relaxed_lyrics + sad_lyrics
-
 all_words = happy_words + angry_words + relaxed_words + sad_words
+
 all_words = nltk.FreqDist(all_words)
-word_features = list(all_words.keys())[:100]
+word_features = list(all_words.keys())[:100] #i changed this to 25 from 100
 
-#random.shuffle(data)
-#featuresets = [(find_features(song), tag) for (song, tag) in data]
+# Create additional testing data
+random.shuffle(data)
+featuresets = [(find_features(song), tag) for (song, tag) in data]
+train_set = featuresets[:680]
+test_set = featuresets[681:]
 
-#train_data = featuresets[:320]
-#test_data = featuresets[321:]
-
-random.shuffle(happy_lyrics)
-random.shuffle(angry_lyrics)
-random.shuffle(relaxed_lyrics)
-random.shuffle(sad_lyrics)
-
-folds = 5
-subset_size = 20
-sum = 0
-test_truth = []
-test_predict = []
-
-happy_prec = 0
-angry_prec = 0
-relaxed_prec = 0
-sad_prec = 0
-happy_rec = 0
-angry_rec = 0
-relaxed_rec = 0
-sad_rec = 0
-
-test_truth = []
-test_predict = []
-
-for i in range (folds):
-    start = int(i*subset_size)
-    end = int(start + subset_size)
-
-    #random.shuffle(happy_lyrics)
-    test_setHappy = happy_lyrics[start:end]
-    train_setHappy = happy_lyrics[:start] + happy_lyrics[end:]
-
-    #random.shuffle(angry_lyrics)
-    test_setAngry = angry_lyrics[start:end]
-    train_setAngry = angry_lyrics[:start] + angry_lyrics[end:]
-
-    #random.shuffle(relaxed_lyrics)
-    test_setRelaxed = relaxed_lyrics[start:end]
-    train_setRelaxed = relaxed_lyrics[:start] + relaxed_lyrics[end:]
-
-    #random.shuffle(sad_lyrics)
-    test_setSad = sad_lyrics[start:end]
-    train_setSad = sad_lyrics[:start] + sad_lyrics[end:]
-
-    training_docs = train_setHappy + train_setAngry + train_setRelaxed + train_setSad
-    testing_docs = test_setHappy + test_setAngry + test_setRelaxed + test_setSad
-
-    train_set = [(find_features(song), tag) for (song, tag) in training_docs]
-
-    test_set = [(find_features(song), tag) for (song, tag) in testing_docs]
-
-    model = nltk.NaiveBayesClassifier.train(train_set)
-    
-    #mnb = SklearnClassifier(MultinomialNB())
-    #model = mnb.train(train_set)
-    #bnb = SklearnClassifier(BernoulliNB())
-    #model = bnb.train(train_set)
-    
-    #lg = SklearnClassifier(LogisticRegression())
-    #model = lg.train(train_set)
-    
-    #svc = SklearnClassifier(LinearSVC())
-    #model = svc.train(train_set)
-    
-    #nsvc = SklearnClassifier(NuSVC())
-    #model = nsvc.train(train_set)
-    
-    #rf = SklearnClassifier(RandomForestClassifier())
-    #model = rf.train(train_set)
-
-    acc = nltk.classify.accuracy(model, test_set)
-
-    sum += acc
-
-    refsets = collections.defaultdict(set)
-    testsets = collections.defaultdict(set)
-
-    for j, (feats, label) in enumerate(test_set):
-        refsets[label].add(j)
-        observed = model.classify(feats)
-        testsets[observed].add(j)
-
-    happy_prec += precision(refsets['happy'], testsets['happy'])
-    angry_prec += precision(refsets['angry'], testsets['angry'])
-    relaxed_prec += precision(refsets['relaxed'], testsets['relaxed'])
-    sad_prec += precision(refsets['sad'], testsets['sad'])
-    happy_rec += recall(refsets['happy'], testsets['happy'])
-    angry_rec += recall(refsets['angry'], testsets['angry'])
-    relaxed_rec += recall(refsets['relaxed'], testsets['relaxed'])
-    sad_rec += recall(refsets['sad'], testsets['sad'])
-
-    test_truth += [s  for (t,s) in test_set]
-    test_predict += [model.classify(t) for (t,s) in test_set]
-    conf = confusion_matrix(test_truth, test_predict)
-    
-print(plot_confusion_matrix(conf, classes, normalize=True, title='Normalized Confusion Matrix'))
-
-
-
-
-
-#Print Averge Metrics
-print("Average Accuracy:", (sum/folds)*100)
-print("Average Happy Precision:", (happy_prec/folds)*100)
-print("Average Angry Precision:", (angry_prec/folds)*100)
-print("Average Relaxed Precision:", (relaxed_prec/folds)*100)
-print("Average Sad Precision:", (sad_prec/folds)*100)
-print("Average Happy Recall:", (happy_rec/folds)*100)
-print("Average Angry Recall:", (angry_rec/folds)*100)
-print("Average Relaxed Recall:", (relaxed_rec/folds)*100)
-print("Average Sad Recall:", (sad_rec/folds)*100)
-
-
-
-
-
-
-
-#                              #
-#                              #
-#         Lexicon-Based        #
-#      Sentiment Analysis      #
-#                              #
-#                              #
 
 # LSA BOW WPS
 
