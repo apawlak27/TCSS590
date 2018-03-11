@@ -9,15 +9,8 @@ import re
 import nltk
 import random
 import numpy as np
-import pandas as pd
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer, WordNetLemmatizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import KFold
-from sklearn.cross_validation import cross_val_score
 
 stop_words = set(stopwords.words('english'))
 port = PorterStemmer()

@@ -13,19 +13,17 @@ from nltk.tokenize import TweetTokenizer
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 
-
 random.seed(33)
 np.set_printoptions(precision=2)
-classes = ['Angry', 'Happy', 'Relaxed', 'Sad']
-
 stop_words = set(stopwords.words('english'))
 port = PorterStemmer()
 tknzr = TweetTokenizer()
 
+# Emotion classes to be classified
+classes = ['Angry', 'Happy', 'Relaxed', 'Sad']
 
-# Dataset file lists, 4 total, one for each emotion
+# Dataset file lists, separated by emotion
 
-# Dataset file lists
 happy_filelist = glob.glob('./data/Happy/Train/happy*.txt')
 #happy_filelist += glob.glob('./data/Happy/Test/happy*.txt')
 angry_filelist = glob.glob('./data/Angry/Train/angry*.txt')
@@ -35,7 +33,9 @@ relaxed_filelist = glob.glob('./data/Relaxed/Train/relaxed*.txt')
 sad_filelist = glob.glob('./data/Sad/Train/sad*.txt')
 #sad_filelist += glob.glob('./data/Sad/Test/sad*.txt')
 
-
+# Reads all files from given filelist and associated emotion tag. 
+# Returns two lists: list of tuples containing lyrics for each file and corresponding emotion
+# as well as a list of all words contained in the files
 def read(filelist, tag):
     lyrics = []
     all_words = []
@@ -62,6 +62,7 @@ def read(filelist, tag):
             break
     return lyrics, all_words
 
+# Returns boolean dictionary of presence of word_features words in given song
 def find_features(song):
     words = set(song)
     features = {}
@@ -70,6 +71,8 @@ def find_features(song):
 
     return features
 
+# Returns a plotted confusion matrix with color coding. 
+# Normalized confusion matrix obtained by setting normalize=True
 def plot_confusion_matrix(cm, classes,
                           normalize=False,
                           title='Confusion matrix',
@@ -105,18 +108,18 @@ def plot_confusion_matrix(cm, classes,
     plt.xlabel('Predicted label')
 
 
-
+# Read in songs for each of the emotions
 happy_lyrics, happy_words = read(happy_filelist, 'happy')
 angry_lyrics, angry_words = read(angry_filelist, 'angry')
 relaxed_lyrics, relaxed_words = read(relaxed_filelist, 'relaxed')
 sad_lyrics, sad_words = read(sad_filelist, 'sad')
 
-data = happy_lyrics + angry_lyrics + relaxed_lyrics + sad_lyrics
-
+# Store all words from read in files. Find frequency distribution of words and save top 100
 all_words = happy_words + angry_words + relaxed_words + sad_words
 all_words = nltk.FreqDist(all_words)
 word_features = list(all_words.keys())[:100]
 
+# Shuffle each emotions lyrics
 random.shuffle(happy_lyrics)
 random.shuffle(angry_lyrics)
 random.shuffle(relaxed_lyrics)
@@ -140,31 +143,30 @@ sad_rec = 0
 test_truth = []
 test_predict = []
 
+# Perform 5-Fold cross validation on songs with an 80/20 split for training and testing
+# Classification is Naive Bayes
 for i in range (folds):
     start = int(i*subset_size)
     end = int(start + subset_size)
 
-    #random.shuffle(happy_lyrics)
     test_setHappy = happy_lyrics[start:end]
     train_setHappy = happy_lyrics[:start] + happy_lyrics[end:]
 
-    #random.shuffle(angry_lyrics)
     test_setAngry = angry_lyrics[start:end]
     train_setAngry = angry_lyrics[:start] + angry_lyrics[end:]
 
-    #random.shuffle(relaxed_lyrics)
     test_setRelaxed = relaxed_lyrics[start:end]
     train_setRelaxed = relaxed_lyrics[:start] + relaxed_lyrics[end:]
 
-    #random.shuffle(sad_lyrics)
     test_setSad = sad_lyrics[start:end]
     train_setSad = sad_lyrics[:start] + sad_lyrics[end:]
-
+    
+    # combine training and testing data for each emotion
     training_docs = train_setHappy + train_setAngry + train_setRelaxed + train_setSad
     testing_docs = test_setHappy + test_setAngry + test_setRelaxed + test_setSad
-
+    
+    # find features for training and testing data
     train_set = [(find_features(song), tag) for (song, tag) in training_docs]
-
     test_set = [(find_features(song), tag) for (song, tag) in testing_docs]
 
     model = nltk.NaiveBayesClassifier.train(train_set)
@@ -185,9 +187,9 @@ for i in range (folds):
     
     #rf = SklearnClassifier(RandomForestClassifier())
     #model = rf.train(train_set)
-
+    
+    # calculate accuracy for fold
     acc = nltk.classify.accuracy(model, test_set)
-
     sum += acc
 
     refsets = collections.defaultdict(set)
@@ -197,7 +199,8 @@ for i in range (folds):
         refsets[label].add(j)
         observed = model.classify(feats)
         testsets[observed].add(j)
-
+    
+    # calculate and accumulate precision and recall for each emotion in fold
     happy_prec += precision(refsets['happy'], testsets['happy'])
     angry_prec += precision(refsets['angry'], testsets['angry'])
     relaxed_prec += precision(refsets['relaxed'], testsets['relaxed'])
@@ -207,14 +210,18 @@ for i in range (folds):
     relaxed_rec += recall(refsets['relaxed'], testsets['relaxed'])
     sad_rec += recall(refsets['sad'], testsets['sad'])
 
+    # accumulate results for each fold - to build confuison matrix for all folds
     test_truth += [s  for (t,s) in test_set]
     test_predict += [model.classify(t) for (t,s) in test_set]
-    conf = confusion_matrix(test_truth, test_predict)
-    
+
+# Build confusion matrix
+conf = confusion_matrix(test_truth, test_predict)
+ 
+# Print ploted and color coded confusion matrix    
 print(plot_confusion_matrix(conf, classes, normalize=True, title='Normalized Confusion Matrix'))
 
 
-#Print Averge Metrics
+# Print Averge Metrics for accuracy, precision and recall
 print("Average Accuracy:", (sum/folds)*100)
 print("Average Happy Precision:", (happy_prec/folds)*100)
 print("Average Angry Precision:", (angry_prec/folds)*100)
